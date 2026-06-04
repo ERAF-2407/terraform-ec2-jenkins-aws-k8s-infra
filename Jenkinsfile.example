@@ -1,0 +1,64 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'us-west-2'
+        ECR_REGISTRY = '123456789012.dkr.ecr.us-west-2.amazonaws.com'
+        APP_NAME = 'my-devsecops-app'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('SCA (Dependency Check)') {
+            steps {
+                echo 'Running Security Component Analysis...'
+                // Example with Trivy scanning the local directory
+                sh 'trivy fs . --severity HIGH,CRITICAL'
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                echo 'Building application...'
+                // sh 'mvn clean package' or 'npm install && npm test'
+            }
+        }
+
+        stage('Container Build & Scan') {
+            steps {
+                echo 'Building Docker Image...'
+                // sh "docker build -t ${APP_NAME}:${IMAGE_TAG} ."
+                
+                echo 'Scanning Docker Image with Trivy...'
+                // sh "trivy image ${APP_NAME}:${IMAGE_TAG} --severity HIGH,CRITICAL"
+            }
+        }
+
+        stage('Deploy to EKS (Staging)') {
+            steps {
+                echo 'Deploying to Kubernetes...'
+                // sh "kubectl apply -f k8s/deployment.yaml"
+            }
+        }
+
+        stage('DAST (OWASP ZAP)') {
+            steps {
+                echo 'Running Dynamic Application Security Testing...'
+                // sh "docker run --rm -t owasp/zap2docker-stable zap-baseline.py -t http://myapp-staging.example.com"
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace...'
+            deleteDir()
+        }
+    }
+}

@@ -1,69 +1,84 @@
 #!/bin/bash
+set -e # Exit on error
 
-# --- Optimización para Instancias Pequeñas (t2.micro) ---
-# Crear un archivo Swap de 2GB para evitar errores de memoria (OOM)
-sudo dd if=/dev/zero of=/swapfile bs=128M count=16
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+# --- DevSecOps Jenkins Installation Script ---
+# Optimized for Amazon Linux 2023
 
-# Actualizar paquetes
-sudo yum update -y
+echo "Starting Jenkins installation and configuration..."
 
-# Instalar Java 17 (Requerido por Jenkins)
-sudo dnf install java-17-amazon-corretto-devel -y
-sudo update-alternatives --set java /usr/lib/jvm/java-17-amazon-corretto.x86_64/bin/java
+# 1. Swap Space (Prevention of OOM on smaller instances)
+if [ ! -f /swapfile ]; then
+    sudo dd if=/dev/zero of=/swapfile bs=128M count=16
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+    echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+fi
 
-# Configurar repositorio de Jenkins
+# 2. System Updates
+sudo dnf update -y
+
+# 3. Dependencies (Java 17, Fonts, Git, jq, etc.)
+sudo dnf install -y java-17-amazon-corretto fontconfig dejavu-sans-fonts git wget unzip jq nodejs npm
+
+# 4. Jenkins Repository
 sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
 sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
-sudo yum upgrade -y
+sudo dnf upgrade -y
 
-# Instalar herramientas básicas
-sudo yum install git wget unzip jq nodejs npm -y
+# 5. Jenkins Installation & Deep Configuration
+sudo dnf install -y jenkins
 
-# Instalar Maven
-sudo wget http://repos.fedorapeople.org/repos/dchen/apache-maven/epel-apache-maven.repo -O /etc/yum.repos.d/epel-apache-maven.repo
-sudo sed -i s/\$releasever/6/g /etc/yum.repos.d/epel-apache-maven.repo
-sudo yum install -y apache-maven
+# Asegurar permisos en directorios críticos
+sudo chown -R jenkins:jenkins /var/lib/jenkins /var/cache/jenkins /var/log/jenkins
 
-# Instalar Jenkins
-sudo yum install jenkins -y
-# Cambiar puerto de Jenkins a 8081 (opcional, según tu configuración original)
-sudo sed -i -e 's/Environment="JENKINS_PORT=[0-9]\+"/Environment="JENKINS_PORT=8081"/' /usr/lib/systemd/system/jenkins.service
+# Override de Systemd con optimizaciones de memoria agresivas para t3.micro
+sudo mkdir -p /etc/systemd/system/jenkins.service.d
+cat <<EOF | sudo tee /etc/systemd/system/jenkins.service.d/override.conf
+[Service]
+Environment="JENKINS_PORT=8081"
+# JAVA_OPTS optimizado: 
+# -Xmx512m (Máximo), -Xms256m (Inicio), -XX:+UseSerialGC (Ahorra CPU/RAM en 1 sola vCPU)
+Environment="JAVA_OPTS=-Xmx512m -Xms256m -Djava.awt.headless=true -XX:+UseSerialGC"
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable jenkins
-sudo systemctl start jenkins
+# Intentar arrancar Jenkins. Si falla, mostrar el error en el log de cloud-init
+sudo systemctl start jenkins || (sudo journalctl -u jenkins --no-pager | tail -n 50)
 
-# Instalar AWS CLI v2
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install
-rm -rf awscliv2.zip aws/
+# 6. AWS CLI v2
+if ! command -v aws &> /dev/null; then
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip -q awscliv2.zip
+    sudo ./aws/install
+    rm -rf awscliv2.zip aws/
+fi
 
-# Instalar ZAP (Zed Attack Proxy)
-sudo wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh
-sudo chmod +x ZAP_2_14_0_unix.sh
-sudo ./ZAP_2_14_0_unix.sh -q -dir /opt/zaproxy
-rm ZAP_2_14_0_unix.sh
+# 7. Docker
+sudo dnf install -y docker
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo usermod -aG docker ec2-user
+sudo usermod -aG docker jenkins
 
-# Instalar kubectl
+# 8. Kubernetes Tools (kubectl, eksctl)
+# kubectl
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 rm kubectl
 
-# Instalar eksctl
+# eksctl
 curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
 sudo mv /tmp/eksctl /usr/local/bin
 
-# Instalar Docker y configurar permisos
-sudo yum install docker -y
-sudo systemctl enable docker
-sudo systemctl start docker
-# Agregar usuarios al grupo docker (sin usar newgrp para evitar bloqueos en script)
-sudo usermod -aG docker ec2-user
-sudo usermod -aG docker jenkins
+# 9. DevSecOps Tools (Trivy)
+TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r .tag_name | sed 's/v//')
+wget https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.rpm
+sudo dnf install -y ./trivy_${TRIVY_VERSION}_Linux-64bit.rpm
+rm trivy_${TRIVY_VERSION}_Linux-64bit.rpm
 
-# Reiniciar Jenkins para aplicar permisos de Docker
+# 10. Final Restart to apply all group permissions
 sudo systemctl restart jenkins
+
+echo "Installation complete!"
