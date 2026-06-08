@@ -136,6 +136,8 @@ resource "aws_instance" "jenkins_server" {
   
   user_data = file("${path.module}/install_jenkins.sh")
 
+  monitoring = true
+
   root_block_device {
     volume_size = 30 # Increased for Docker images and ZAP
     volume_type = "gp3"

@@ -19,7 +19,7 @@ fi
 sudo dnf update -y
 
 # 3. Dependencies (Java 17, Fonts, Git, jq, etc.)
-sudo dnf install -y java-17-amazon-corretto fontconfig dejavu-sans-fonts git wget unzip jq nodejs npm
+sudo dnf install -y java-21-amazon-corretto fontconfig dejavu-sans-fonts git wget unzip jq nodejs npm
 
 # 4. Jenkins Repository
 sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
@@ -30,6 +30,7 @@ sudo dnf upgrade -y
 sudo dnf install -y jenkins
 
 # Asegurar permisos en directorios críticos
+sudo mkdir -p /var/lib/jenkins /var/cache/jenkins /var/log/jenkins
 sudo chown -R jenkins:jenkins /var/lib/jenkins /var/cache/jenkins /var/log/jenkins
 
 # Override de Systemd con optimizaciones de memoria agresivas para t3.micro

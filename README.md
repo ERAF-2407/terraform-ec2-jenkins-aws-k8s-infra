@@ -55,3 +55,7 @@ Once the instance is ready (it may take 5-10 minutes for `user_data` to finish):
 ```bash
 terraform destroy
 ```
+## URL Jenkins:
+http://34.216.113.149:8081/
+admin
+4dm1n!
